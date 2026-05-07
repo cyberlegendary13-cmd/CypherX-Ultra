@@ -1,4 +1,4 @@
-const util = require('util');
+const { prettyResult, truncate } = require('../Functions/inspect.js');
 
 module.exports = () => ({
   name: "Debug Eval",
@@ -8,7 +8,7 @@ module.exports = () => ({
   owner: true,
   react: "🐛",
 
-  run: async ({ m, Cypher, args, text }) => {
+  run: async ({ m, Cypher, args, text, db, sessionId }) => {
     if (!text) {
       return m.reply(
         `🐛 *Debug Eval Command*\n\n` +
@@ -19,36 +19,24 @@ module.exports = () => ({
         `.eval Cypher.user - Get bot user info\n` +
         `.eval m.mentionedJid - Get mentioned JIDs\n` +
         `.eval m - Dump entire message object\n\n` +
-        `Examples:\n` +
-        `.eval m.chat\n` +
-        `.eval m.sender\n` +
-        `.eval Cypher.user.id`
+        `Tip: \`.eval\` is the obfuscation-safe option — use it when \`> <expr>\` stops working on protected builds.`
       );
     }
 
     try {
-      let result;
-      
       const expression = text.trim();
-      
-      const context = {
-        m,
-        Cypher,
-        args
-      };
-      
-      const evaluator = new Function(...Object.keys(context), `return ${expression}`);
-      result = evaluator(...Object.values(context));
-      
-      let output = util.inspect(result, {
-        depth: 3,
-        colors: false,
-        compact: false
-      });
 
-      if (output.length > 2000) {
-        output = output.substring(0, 1997) + '...';
-      }
+      const context = { m, Cypher, args, db, sessionId };
+
+      const body = expression.includes('await') || /\breturn\b/.test(expression)
+        ? `return (async () => { ${expression} })()`
+        : `return (${expression})`;
+
+      const evaluator = new Function(...Object.keys(context), body);
+      let result = evaluator(...Object.values(context));
+      if (result && typeof result.then === 'function') result = await result;
+
+      const output = truncate(prettyResult(result), 10000);
 
       return m.reply(
         `🐛 *Debug Result*\n\n` +
@@ -56,10 +44,11 @@ module.exports = () => ({
         `*Result:*\n\`\`\`\n${output}\n\`\`\``
       );
     } catch (error) {
+      const stack = (error.stack || '').split('\n').slice(0, 4).join('\n');
       return m.reply(
         `❌ *Error*\n\n` +
         `*Expression:* \`${text}\`\n\n` +
-        `*Error:*\n\`\`\`\n${error.message}\n\`\`\``
+        `*Error:*\n\`\`\`\n${error.message}\n${stack}\n\`\`\``
       );
     }
   }
